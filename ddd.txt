@@ -1,0 +1,9 @@
+# รัน AppImage
+./dist/"Levento AI Browser-1.0.0.AppImage"
+# → รอ 3 วิ → check GitHub... (ยังไม่มี update = ไม่มี popup)
+
+# ครั้งหน้าเมื่อปล่อย version ใหม่:
+# 1. แก้ "version": "1.1.0" ใน package.json
+# 2. npm run build:linux
+# 3. gh release create v1.1.0 "dist/Levento AI Browser-1.1.0.AppImage"
+# 4. gh release upload v1.1.0 dist/latest-linux.yml

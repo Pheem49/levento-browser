@@ -22,7 +22,7 @@
     "icon": "assets/icon.png",
     "publish": {
       "provider": "github",
-      "owner": "YourGitHubUsername",
+      "owner": "Pheem49",
       "repo": "levento-browser"
     },
     "files": [
