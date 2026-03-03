@@ -1,0 +1,64 @@
+{
+  "name": "levento-browser",
+  "version": "1.0.0",
+  "description": "Levento — AI-native Desktop Browser",
+  "main": "main.js",
+  "homepage": "https://levento.app",
+  "author": {
+    "name": "Levento",
+    "email": "hello@levento.app"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.levento.browser",
+    "productName": "Levento AI Browser",
+    "icon": "assets/icon.png",
+    "publish": {
+      "provider": "github",
+      "owner": "YourGitHubUsername",
+      "repo": "levento-browser"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "style.css",
+      "assets/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network",
+      "icon": "assets/icon.png",
+      "maintainer": "hello@levento.app"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^40.6.1",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  }
+}
