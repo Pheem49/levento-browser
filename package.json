@@ -1,6 +1,6 @@
 {
   "name": "levento-browser",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Levento — AI-native Desktop Browser",
   "main": "main.js",
   "homepage": "https://levento.app",
@@ -39,7 +39,10 @@
       ],
       "category": "Network",
       "icon": "assets/icon.png",
-      "maintainer": "hello@levento.app"
+      "maintainer": "hello@levento.app",
+      "desktop": {
+        "StartupWMClass": "levento-browser"
+      }
     },
     "win": {
       "target": "nsis",

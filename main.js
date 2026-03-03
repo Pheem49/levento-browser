@@ -1,5 +1,6 @@
 const { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
 
 // ─── Auto-Updater ─────────────────────────────────────────────────────────────
 let autoUpdater;
@@ -55,6 +56,40 @@ function setupAutoUpdater() {
 }
 
 let win;
+let gpuCrashDetected = false;
+
+const gpuFallbackMarkerPath = path.join(app.getPath('userData'), 'gpu-fallback.json');
+let gpuFallbackEnabled = false;
+
+function loadGpuFallbackState() {
+    try {
+        const raw = fs.readFileSync(gpuFallbackMarkerPath, 'utf8');
+        const data = JSON.parse(raw);
+        return Boolean(data && data.enabled);
+    } catch (e) {
+        return false;
+    }
+}
+
+function saveGpuFallbackState(enabled, reason = '') {
+    try {
+        const payload = {
+            enabled,
+            reason,
+            updatedAt: new Date().toISOString()
+        };
+        fs.mkdirSync(path.dirname(gpuFallbackMarkerPath), { recursive: true });
+        fs.writeFileSync(gpuFallbackMarkerPath, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Failed to persist GPU fallback state:', e.message);
+    }
+}
+
+gpuFallbackEnabled = loadGpuFallbackState();
+if (gpuFallbackEnabled) {
+    app.disableHardwareAcceleration();
+    console.warn('GPU fallback enabled: hardware acceleration is disabled for this launch.');
+}
 
 // ─── Tab State ───────────────────────────────────────────────────────────────
 let tabs = [];       // [{ id, view, url, title }]
@@ -248,15 +283,21 @@ function setupContextMenu(webContents) {
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
+    const windowIconPath = path.join(__dirname, 'assets', 'icon.png');
     win = new BrowserWindow({
         width: 1400,
         height: 900,
+        icon: windowIconPath,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         }
     });
+
+    if (process.platform === 'linux') {
+        win.setIcon(windowIconPath);
+    }
 
     win.loadFile('index.html');
 
@@ -352,6 +393,25 @@ app.whenReady().then(() => {
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+});
+
+app.on('child-process-gone', (event, details) => {
+    if (details.type === 'GPU' && details.reason !== 'clean-exit') {
+        gpuCrashDetected = true;
+        console.error('GPU process crashed:', details);
+    }
+});
+
+app.on('before-quit', () => {
+    if (gpuCrashDetected) {
+        saveGpuFallbackState(true, 'Detected GPU process crash');
+        return;
+    }
+
+    if (gpuFallbackEnabled) {
+        // If we launched in fallback mode and stayed stable, try GPU again next run.
+        saveGpuFallbackState(false, 'Cleared after stable fallback launch');
+    }
 });
 
 app.on('window-all-closed', () => {
