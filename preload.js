@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('browserAPI', {
     // Modal
     openModal: () => ipcRenderer.send('modal-open'),
     closeModal: () => ipcRenderer.send('modal-close'),
+    openDataFolder: () => ipcRenderer.invoke('open-data-folder'),
 
     // Sidebar
     sidebarToggle: (isOpen) => ipcRenderer.send('sidebar-toggle', isOpen),

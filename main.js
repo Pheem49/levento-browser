@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -567,6 +567,19 @@ ipcMain.handle('get-page-text', async () => {
         }
     }
     return '';
+});
+
+ipcMain.handle('open-data-folder', async () => {
+    try {
+        const dataDir = app.getPath('userData');
+        const result = await shell.openPath(dataDir);
+        if (result) {
+            return { ok: false, error: result };
+        }
+        return { ok: true, path: dataDir };
+    } catch (e) {
+        return { ok: false, error: e.message || 'Unable to open data folder' };
+    }
 });
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────

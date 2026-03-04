@@ -555,6 +555,7 @@ const settingsModal = document.getElementById('settings-modal');
 const geminiKeyInput = document.getElementById('gemini-key-input');
 const btnSettingsSave = document.getElementById('btn-settings-save');
 const btnSettingsCancel = document.getElementById('btn-settings-cancel');
+const btnOpenDataFolder = document.getElementById('btn-open-data-folder');
 
 // Load stored settings on init
 const storedKey = localStorage.getItem('levento-gemini-key') || "";
@@ -579,6 +580,15 @@ btnSettingsSave.addEventListener('click', () => {
 modelSelect.addEventListener('change', (e) => {
     localStorage.setItem('levento-model', e.target.value);
 });
+if (btnOpenDataFolder) {
+    btnOpenDataFolder.addEventListener('click', async () => {
+        try {
+            await window.browserAPI.openDataFolder();
+        } catch (e) {
+            console.error('Open data folder failed:', e);
+        }
+    });
+}
 
 
 // --- Stats Panel Updater ---
