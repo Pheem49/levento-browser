@@ -5,5 +5,11 @@
 # ครั้งหน้าเมื่อปล่อย version ใหม่:
 # 1. แก้ "version": "1.1.0" ใน package.json
 # 2. npm run build:linux
-# 3. gh release create v1.1.0 "dist/Levento AI Browser-1.1.0.AppImage"
-# 4. gh release upload v1.1.0 dist/latest-linux.yml
+# 3. gh release create v1.3.1 "dist/Levento AI Browser-1.3.1.AppImage"
+# 4. gh release upload v1.3.1 dist/latest-linux.yml
+
+# เจาะจงเวอร์ชัน ln -sfn "$PWD/dist/Levento AI Browser-1.3.1.AppImage" "$PWD/dist/levento-browser.AppImage"
+# ตรวจว่า link ชี้ถูก ls -l dist/levento-browser.AppImage
+# รันแอพ
+# ./dist/levento-browser.AppImage
+
