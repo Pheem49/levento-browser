@@ -770,6 +770,10 @@ ipcMain.handle('set-gpu-safe-mode', async (_event, enabled) => {
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+
+    console.log("Chromium version:", process.versions.chrome);
+    console.log("Electron version:", process.versions.electron);
+
     setupPermissionSecurity();
     setupAdblockFiltering();
     createWindow();
