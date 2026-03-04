@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('browserAPI', {
 
     // Sidebar
     sidebarToggle: (isOpen) => ipcRenderer.send('sidebar-toggle', isOpen),
+    setAddressSuggestionsInset: (pixels) => ipcRenderer.send('address-suggestions-inset', pixels),
 
     // AI Context Menu
     onAIAction: (cb) => ipcRenderer.on('ai-action', (_e, data) => cb(data)),

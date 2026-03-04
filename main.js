@@ -96,22 +96,134 @@ let tabs = [];       // [{ id, view, url, title }]
 let activeTabId = null;
 let nextTabId = 0;
 let sidebarOpen = true;  // track sidebar state for resizing
+let addressSuggestionsInsetTarget = 0;
+let addressSuggestionsInsetCurrent = 0;
+let insetAnimationTimer = null;
 
 function getActiveView() {
     const tab = tabs.find(t => t.id === activeTabId);
     return tab ? tab.view : null;
 }
 
+function resolveNavigationTarget(rawInput) {
+    const input = String(rawInput || '').trim();
+    if (!input) return '';
+
+    if (/^(https?:\/\/|file:\/\/|about:|data:)/i.test(input)) {
+        return input;
+    }
+
+    const hasSpaces = /\s/.test(input);
+    const hasDot = input.includes('.');
+    const isLocalhost = /^localhost(?::\d+)?(\/.*)?$/i.test(input);
+    const isIPv4 = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(\/.*)?$/.test(input);
+    const isLikelyUrl = (hasDot && !hasSpaces) || isLocalhost || isIPv4;
+
+    if (isLikelyUrl) {
+        return `https://${input}`;
+    }
+
+    return `https://www.google.com/search?q=${encodeURIComponent(input)}`;
+}
+
+function emitTabUpdate(id, patch = {}) {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+    Object.assign(tab, patch);
+    if (!win) return;
+    win.webContents.send('tab-update', {
+        id,
+        title: tab.title,
+        url: tab.url,
+        favicon: tab.favicon,
+        loading: Boolean(tab.loading),
+        loadProgress: Math.max(0, Math.min(100, Math.round(tab.loadProgress || 0)))
+    });
+}
+
+function stopTabLoadingProgress(id) {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab || !tab.loadingInterval) return;
+    clearInterval(tab.loadingInterval);
+    tab.loadingInterval = null;
+}
+
+function beginTabLoading(id) {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+
+    tab.loadingToken = (tab.loadingToken || 0) + 1;
+    stopTabLoadingProgress(id);
+    tab.loading = true;
+    tab.loadProgress = Math.max(8, Math.min(35, Math.round(tab.loadProgress || 8)));
+    emitTabUpdate(id, { loading: true, loadProgress: tab.loadProgress });
+
+    tab.loadingInterval = setInterval(() => {
+        const current = Math.max(0, Math.min(98, Math.round(tab.loadProgress || 0)));
+        const next = current + Math.max(1, Math.round((92 - current) * 0.14));
+        tab.loadProgress = Math.min(92, next);
+        emitTabUpdate(id, { loadProgress: tab.loadProgress, loading: true });
+    }, 120);
+}
+
+function completeTabLoading(id) {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+    const tokenAtComplete = tab.loadingToken || 0;
+
+    stopTabLoadingProgress(id);
+    tab.loading = true;
+    tab.loadProgress = 100;
+    emitTabUpdate(id, { loading: true, loadProgress: 100 });
+
+    setTimeout(() => {
+        const latestTab = tabs.find(t => t.id === id);
+        if (!latestTab) return;
+        if ((latestTab.loadingToken || 0) !== tokenAtComplete) return;
+        emitTabUpdate(id, { loading: false, loadProgress: 0 });
+    }, 180);
+}
+
+function getCurrentAddressInset() {
+    return Math.max(0, Math.floor(addressSuggestionsInsetCurrent || 0));
+}
+
 function getViewBounds() {
     if (!win) return { x: 0, y: 86, width: 1050, height: 814 };
     const b = win.getContentBounds();
     const sidebarWidth = sidebarOpen ? 350 : 0;
+    const baseTop = 86;
+    const topInset = getCurrentAddressInset();
+    const y = baseTop + topInset;
     return {
         x: 0,
-        y: 86,          // toolbar (50px) + tab bar (36px)
+        y,          // toolbar (50px) + tab bar (36px) + temporary suggestions inset
         width: b.width - sidebarWidth,
-        height: b.height - 86
+        height: Math.max(0, b.height - y)
     };
+}
+
+function applyActiveViewBounds() {
+    const view = getActiveView();
+    if (view) view.setBounds(getViewBounds());
+}
+
+function animateAddressInsetTo(nextInset) {
+    addressSuggestionsInsetTarget = Math.max(0, Math.floor(nextInset || 0));
+    if (insetAnimationTimer) return;
+
+    insetAnimationTimer = setInterval(() => {
+        const delta = addressSuggestionsInsetTarget - addressSuggestionsInsetCurrent;
+        if (Math.abs(delta) < 1) {
+            addressSuggestionsInsetCurrent = addressSuggestionsInsetTarget;
+            applyActiveViewBounds();
+            clearInterval(insetAnimationTimer);
+            insetAnimationTimer = null;
+            return;
+        }
+        addressSuggestionsInsetCurrent += delta * 0.28;
+        applyActiveViewBounds();
+    }, 16);
 }
 
 // ─── Tab creation ─────────────────────────────────────────────────────────────
@@ -125,22 +237,18 @@ function createTab(url = 'https://google.com', activate = true) {
     win.contentView.addChildView(view);
     view.setBounds(getViewBounds());
 
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-    }
+    url = resolveNavigationTarget(url);
     view.webContents.loadURL(url);
 
     // Wire URL events
     view.webContents.on('did-navigate', (event, newUrl) => {
-        const tab = tabs.find(t => t.id === id);
-        if (tab) tab.url = newUrl;
+        emitTabUpdate(id, { url: newUrl });
         if (id === activeTabId && win) {
             win.webContents.send('browser-url-changed', newUrl);
         }
     });
     view.webContents.on('did-navigate-in-page', (event, newUrl) => {
-        const tab = tabs.find(t => t.id === id);
-        if (tab) tab.url = newUrl;
+        emitTabUpdate(id, { url: newUrl });
         if (id === activeTabId && win) {
             win.webContents.send('browser-url-changed', newUrl);
         }
@@ -148,20 +256,19 @@ function createTab(url = 'https://google.com', activate = true) {
 
     // Wire title / favicon events
     view.webContents.on('page-title-updated', (event, title) => {
-        const tab = tabs.find(t => t.id === id);
-        if (tab) tab.title = title;
-        if (win) win.webContents.send('tab-update', { id, title, url: tab?.url, favicon: tab?.favicon });
+        emitTabUpdate(id, { title });
     });
     view.webContents.on('page-favicon-updated', (event, favicons) => {
-        const tab = tabs.find(t => t.id === id);
-        if (tab && favicons.length) tab.favicon = favicons[0];
-        if (win) win.webContents.send('tab-update', { id, title: tab?.title, url: tab?.url, favicon: favicons[0] });
+        if (favicons.length) emitTabUpdate(id, { favicon: favicons[0] });
     });
+    view.webContents.on('did-start-loading', () => beginTabLoading(id));
+    view.webContents.on('did-stop-loading', () => completeTabLoading(id));
+    view.webContents.on('did-fail-load', () => completeTabLoading(id));
 
     // Context menu
     setupContextMenu(view.webContents);
 
-    const tab = { id, view, url, title: 'New Tab', favicon: '' };
+    const tab = { id, view, url, title: 'New Tab', favicon: '', loading: true, loadProgress: 8, loadingInterval: null, loadingToken: 0 };
     tabs.push(tab);
 
     if (activate) {
@@ -204,6 +311,7 @@ function closeTab(id) {
     if (idx === -1) return;
 
     const tab = tabs[idx];
+    if (tab.loadingInterval) clearInterval(tab.loadingInterval);
     tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     win.contentView.removeChildView(tab.view);
     tab.view.webContents.destroy();
@@ -221,7 +329,14 @@ function closeTab(id) {
 function getTabsSummary() {
     return {
         activeTabId,
-        tabs: tabs.map(t => ({ id: t.id, title: t.title, url: t.url, favicon: t.favicon }))
+        tabs: tabs.map(t => ({
+            id: t.id,
+            title: t.title,
+            url: t.url,
+            favicon: t.favicon,
+            loading: Boolean(t.loading),
+            loadProgress: Math.max(0, Math.min(100, Math.round(t.loadProgress || 0)))
+        }))
     };
 }
 
@@ -288,6 +403,7 @@ function createWindow() {
         width: 1400,
         height: 900,
         icon: windowIconPath,
+        backgroundColor: '#0b0f16',
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -302,8 +418,7 @@ function createWindow() {
     win.loadFile('index.html');
 
     win.on('resize', () => {
-        const view = getActiveView();
-        if (view) view.setBounds(getViewBounds());
+        applyActiveViewBounds();
     });
 
     win.webContents.once('did-finish-load', () => {
@@ -337,8 +452,14 @@ ipcMain.on('modal-close', () => {
 
 ipcMain.on('sidebar-toggle', (event, isOpen) => {
     sidebarOpen = isOpen;
-    const view = getActiveView();
-    if (view) view.setBounds(getViewBounds());
+    applyActiveViewBounds();
+});
+
+ipcMain.on('address-suggestions-inset', (event, insetPx) => {
+    const parsed = Number(insetPx);
+    const nextInset = Number.isFinite(parsed) ? Math.max(0, Math.min(320, Math.floor(parsed))) : 0;
+    if (nextInset === addressSuggestionsInsetTarget) return;
+    animateAddressInsetTo(nextInset);
 });
 
 ipcMain.on('browser-go-back', () => {
@@ -359,10 +480,9 @@ ipcMain.on('browser-reload', () => {
 ipcMain.on('browser-navigate', (event, url) => {
     const view = getActiveView();
     if (view) {
-        if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+        url = resolveNavigationTarget(url);
         view.webContents.loadURL(url);
-        const tab = tabs.find(t => t.id === activeTabId);
-        if (tab) tab.url = url;
+        emitTabUpdate(activeTabId, { url });
     }
 });
 

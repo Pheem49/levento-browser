@@ -16,10 +16,318 @@ document.getElementById('btn-dev-tools').addEventListener('click', () => {
 });
 
 const addressInput = document.getElementById('address-input');
+const addressSuggestions = document.getElementById('address-suggestions');
+const addressQuickSuggestions = [
+    { title: 'Google', url: 'google.com' },
+    { title: 'YouTube', url: 'youtube.com' },
+    { title: 'GitHub', url: 'github.com' },
+    { title: 'Stack Overflow', url: 'stackoverflow.com' },
+    { title: 'Facebook', url: 'facebook.com' },
+    { title: 'X', url: 'x.com' },
+    { title: 'Wikipedia', url: 'wikipedia.org' },
+    { title: 'Reddit', url: 'reddit.com' },
+    { title: 'ChatGPT', url: 'chatgpt.com' },
+    { title: 'Gmail', url: 'gmail.com' }
+];
+const historyStorageKey = 'levento-address-history-v1';
+const historyLimit = 80;
+let addressHistory = [];
+let currentSuggestions = [];
+let activeSuggestionIndex = -1;
+let suppressSuggestionRefresh = false;
+let lastAddressInsetSent = -1;
+
+function reportAddressSuggestionsInset() {
+    if (!window.browserAPI || !window.browserAPI.setAddressSuggestionsInset) return;
+
+    let inset = 0;
+    if (addressSuggestions && addressSuggestions.classList.contains('show')) {
+        const webRoot = document.getElementById('browser-view');
+        if (webRoot) {
+            const dropdownRect = addressSuggestions.getBoundingClientRect();
+            const webTop = webRoot.getBoundingClientRect().top;
+            inset = Math.max(0, Math.ceil(dropdownRect.bottom - webTop + 8));
+        }
+    }
+
+    if (inset === lastAddressInsetSent) return;
+    lastAddressInsetSent = inset;
+    window.browserAPI.setAddressSuggestionsInset(inset);
+}
+
+function loadAddressHistory() {
+    try {
+        const raw = localStorage.getItem(historyStorageKey);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+            addressHistory = parsed
+                .map(item => {
+                    if (typeof item === 'string') {
+                        return { url: item.trim(), title: '', favicon: '', lastVisited: Date.now() };
+                    }
+                    if (!item || typeof item !== 'object') return null;
+                    return {
+                        url: String(item.url || '').trim(),
+                        title: String(item.title || '').trim(),
+                        favicon: String(item.favicon || '').trim(),
+                        lastVisited: Number(item.lastVisited) || Date.now()
+                    };
+                })
+                .filter(item => item && item.url)
+                .slice(0, historyLimit);
+        }
+    } catch (e) {
+        addressHistory = [];
+    }
+}
+
+function saveAddressHistory() {
+    try {
+        localStorage.setItem(historyStorageKey, JSON.stringify(addressHistory.slice(0, historyLimit)));
+    } catch (e) { }
+}
+
+function addAddressHistory(url, meta = {}) {
+    const clean = String(url || '').trim();
+    if (!clean || clean === 'about:blank') return;
+    const existing = addressHistory.find(item => item.url === clean);
+    const next = {
+        url: clean,
+        title: String(meta.title || existing?.title || '').trim(),
+        favicon: String(meta.favicon || existing?.favicon || '').trim(),
+        lastVisited: Date.now()
+    };
+    addressHistory = [next, ...addressHistory.filter(item => item.url !== clean)].slice(0, historyLimit);
+    saveAddressHistory();
+}
+
+function normalizeUrlForDisplay(url) {
+    return String(url || '').replace(/^https?:\/\//i, '').replace(/\/$/, '');
+}
+
+function getHostname(url) {
+    try {
+        const resolved = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+        return new URL(resolved).hostname.replace(/^www\./, '');
+    } catch (e) {
+        return normalizeUrlForDisplay(url);
+    }
+}
+
+function getDomainFavicon(url) {
+    const host = getHostname(url);
+    return host ? `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(host)}` : '';
+}
+
+function buildSuggestions(query) {
+    const raw = query.trim();
+    const q = raw.toLowerCase();
+    if (!q) return [];
+
+    const seen = new Set();
+    const output = [];
+    const push = (item) => {
+        const navigateValue = String(item.navigateValue || '').trim();
+        if (!navigateValue) return;
+        const key = navigateValue.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        output.push({
+            navigateValue,
+            title: String(item.title || navigateValue),
+            subtitle: String(item.subtitle || ''),
+            kind: String(item.kind || ''),
+            icon: String(item.icon || ''),
+            iconType: item.iconType === 'emoji' ? 'emoji' : 'image'
+        });
+    };
+    const matches = (text) => String(text || '').toLowerCase().includes(q);
+
+    const looksLikeUrl = q.includes('.') || q.includes(':') || q.includes('/');
+    if (looksLikeUrl) {
+        push({
+            navigateValue: raw,
+            title: `Go to ${normalizeUrlForDisplay(raw)}`,
+            subtitle: raw,
+            kind: 'Navigate',
+            icon: '↗',
+            iconType: 'emoji'
+        });
+    }
+
+    if (!looksLikeUrl) {
+        push({
+            navigateValue: `https://www.google.com/search?q=${encodeURIComponent(raw)}`,
+            title: `Search "${raw}"`,
+            subtitle: 'Google Search',
+            kind: 'Search',
+            icon: '🔎',
+            iconType: 'emoji'
+        });
+    }
+
+    addressHistory
+        .filter(item => matches(item.url) || matches(item.title))
+        .sort((a, b) => (b.lastVisited || 0) - (a.lastVisited || 0))
+        .slice(0, 6)
+        .forEach(item => {
+            const subtitle = normalizeUrlForDisplay(item.url);
+            push({
+                navigateValue: item.url,
+                title: item.title || getHostname(item.url),
+                subtitle,
+                kind: 'History',
+                icon: item.favicon || getDomainFavicon(item.url)
+            });
+        });
+
+    addressQuickSuggestions
+        .filter(item => matches(item.title) || matches(item.url))
+        .slice(0, 8)
+        .forEach(item => {
+            push({
+                navigateValue: item.url,
+                title: item.title,
+                subtitle: item.url,
+                kind: 'Example',
+                icon: getDomainFavicon(item.url)
+            });
+        });
+
+    // Always append popular examples so dropdown does not collapse to a single row.
+    addressQuickSuggestions.forEach(item => {
+        push({
+            navigateValue: item.url,
+            title: item.title,
+            subtitle: item.url,
+            kind: 'Example',
+            icon: getDomainFavicon(item.url)
+        });
+    });
+
+    return output.slice(0, 8);
+}
+
+function hideAddressSuggestions() {
+    currentSuggestions = [];
+    activeSuggestionIndex = -1;
+    if (addressSuggestions) {
+        addressSuggestions.classList.remove('show');
+        addressSuggestions.innerHTML = '';
+    }
+    reportAddressSuggestionsInset();
+}
+
+function applySelectedSuggestion(index) {
+    if (index < 0 || index >= currentSuggestions.length) return false;
+    const chosen = currentSuggestions[index];
+    suppressSuggestionRefresh = true;
+    addressInput.value = chosen.navigateValue;
+    suppressSuggestionRefresh = false;
+    hideAddressSuggestions();
+    window.browserAPI.navigate(chosen.navigateValue);
+    return true;
+}
+
+function renderAddressSuggestions(items) {
+    if (!addressSuggestions) return;
+    currentSuggestions = items;
+    activeSuggestionIndex = -1;
+
+    if (!items.length) {
+        hideAddressSuggestions();
+        return;
+    }
+
+    addressSuggestions.innerHTML = '';
+    items.forEach((item, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'address-suggestion-item';
+        button.setAttribute('role', 'option');
+        const left = document.createElement('span');
+        left.className = 'suggestion-left';
+        const icon = document.createElement('span');
+        icon.className = 'suggestion-icon';
+        if (item.iconType === 'emoji') {
+            icon.textContent = item.icon || '🌐';
+        } else {
+            const img = document.createElement('img');
+            img.src = item.icon || '';
+            img.alt = '';
+            img.width = 16;
+            img.height = 16;
+            img.onerror = () => {
+                icon.textContent = '🌐';
+            };
+            icon.appendChild(img);
+        }
+        const textWrap = document.createElement('span');
+        textWrap.className = 'suggestion-text';
+        const title = document.createElement('span');
+        title.className = 'suggestion-label';
+        title.textContent = item.title;
+        const sub = document.createElement('span');
+        sub.className = 'suggestion-subtitle';
+        sub.textContent = item.subtitle;
+        textWrap.appendChild(title);
+        if (item.subtitle) textWrap.appendChild(sub);
+        const kind = document.createElement('span');
+        kind.className = 'suggestion-kind';
+        kind.textContent = item.kind;
+        left.appendChild(icon);
+        left.appendChild(textWrap);
+        button.appendChild(left);
+        button.appendChild(kind);
+        button.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            applySelectedSuggestion(index);
+        });
+        addressSuggestions.appendChild(button);
+    });
+    addressSuggestions.classList.add('show');
+    reportAddressSuggestionsInset();
+}
+
+function refreshAddressSuggestions() {
+    if (suppressSuggestionRefresh) return;
+    const input = addressInput.value || '';
+    renderAddressSuggestions(buildSuggestions(input));
+}
+
+loadAddressHistory();
+
+addressInput.addEventListener('input', refreshAddressSuggestions);
+addressInput.addEventListener('focus', refreshAddressSuggestions);
+addressInput.addEventListener('blur', () => {
+    setTimeout(hideAddressSuggestions, 100);
+});
+window.addEventListener('resize', reportAddressSuggestionsInset);
 addressInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && currentSuggestions.length) {
+        e.preventDefault();
+        activeSuggestionIndex = (activeSuggestionIndex + 1) % currentSuggestions.length;
+        const nodes = addressSuggestions.querySelectorAll('.address-suggestion-item');
+        nodes.forEach((node, idx) => node.classList.toggle('active', idx === activeSuggestionIndex));
+        return;
+    }
+    if (e.key === 'ArrowUp' && currentSuggestions.length) {
+        e.preventDefault();
+        activeSuggestionIndex = activeSuggestionIndex <= 0 ? currentSuggestions.length - 1 : activeSuggestionIndex - 1;
+        const nodes = addressSuggestions.querySelectorAll('.address-suggestion-item');
+        nodes.forEach((node, idx) => node.classList.toggle('active', idx === activeSuggestionIndex));
+        return;
+    }
+    if (e.key === 'Escape') {
+        hideAddressSuggestions();
+        return;
+    }
     if (e.key === 'Enter') {
-        const url = addressInput.value.trim();
-        if (url) window.browserAPI.navigate(url);
+        const typed = addressInput.value.trim();
+        if (!typed) return;
+        if (applySelectedSuggestion(activeSuggestionIndex)) return;
+        hideAddressSuggestions();
+        window.browserAPI.navigate(typed);
     }
 });
 
@@ -58,19 +366,22 @@ function renderTabBar(tabs, currentId) {
     tabs.forEach(tab => {
         const pill = document.createElement('div');
         pill.className = 'tab-item' + (tab.id === currentId ? ' active' : '');
+        if (tab.loading) pill.classList.add('loading');
         pill.dataset.tabId = tab.id;
 
-        const favicon = document.createElement('span');
-        favicon.className = 'tab-favicon';
-        if (tab.favicon) {
+        const statusIcon = document.createElement('span');
+        statusIcon.className = 'tab-status-icon';
+        if (tab.loading) {
+            statusIcon.classList.add('loading-dot');
+        } else if (tab.favicon) {
             const img = document.createElement('img');
             img.src = tab.favicon;
             img.width = 13; img.height = 13;
-            img.style.borderRadius = '2px';
-            img.onerror = () => { favicon.textContent = '🌐'; };
-            favicon.appendChild(img);
+            img.style.borderRadius = '3px';
+            img.onerror = () => { statusIcon.textContent = '🌐'; };
+            statusIcon.appendChild(img);
         } else {
-            favicon.textContent = '🌐';
+            statusIcon.textContent = '🌐';
         }
 
         const title = document.createElement('span');
@@ -86,7 +397,7 @@ function renderTabBar(tabs, currentId) {
             window.browserAPI.closeTab(tab.id);
         });
 
-        pill.appendChild(favicon);
+        pill.appendChild(statusIcon);
         pill.appendChild(title);
         pill.appendChild(closeBtn);
 
@@ -107,6 +418,8 @@ window.browserAPI.onTabsChanged((data) => {
         tabsState[t.id].title = t.title;
         tabsState[t.id].url = t.url;
         tabsState[t.id].favicon = t.favicon;
+        tabsState[t.id].loading = t.loading;
+        tabsState[t.id].loadProgress = t.loadProgress;
     });
     activeTabId = newActiveId;
     renderTabBar(tabs, newActiveId);
@@ -121,6 +434,9 @@ window.browserAPI.onTabSwitched((id) => {
 window.browserAPI.onTabUpdate((data) => {
     if (!tabsState[data.id]) tabsState[data.id] = { cachedContext: '' };
     Object.assign(tabsState[data.id], data);
+    if (data.url) {
+        addAddressHistory(data.url, { title: data.title, favicon: data.favicon });
+    }
 });
 
 function updatePageInfoPanel() {
@@ -174,7 +490,10 @@ async function refreshPageInfo(url) {
 }
 
 window.browserAPI.onUrlChange(async (newUrl) => {
+    const tabMeta = activeTabId !== null ? tabsState[activeTabId] : null;
+    addAddressHistory(newUrl, { title: tabMeta?.title, favicon: tabMeta?.favicon });
     addressInput.value = newUrl;
+    hideAddressSuggestions();
     // Store URL in tab state
     if (activeTabId !== null && tabsState[activeTabId]) {
         tabsState[activeTabId].url = newUrl;
