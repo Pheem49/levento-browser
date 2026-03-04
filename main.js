@@ -59,7 +59,9 @@ let win;
 let gpuCrashDetected = false;
 
 const gpuFallbackMarkerPath = path.join(app.getPath('userData'), 'gpu-fallback.json');
+const sessionStatePath = path.join(app.getPath('userData'), 'tabs-session.json');
 let gpuFallbackEnabled = false;
+let sessionSaveTimer = null;
 
 function loadGpuFallbackState() {
     try {
@@ -89,6 +91,62 @@ gpuFallbackEnabled = loadGpuFallbackState();
 if (gpuFallbackEnabled) {
     app.disableHardwareAcceleration();
     console.warn('GPU fallback enabled: hardware acceleration is disabled for this launch.');
+}
+
+function loadSessionState() {
+    try {
+        const raw = fs.readFileSync(sessionStatePath, 'utf8');
+        const data = JSON.parse(raw);
+        const urls = Array.isArray(data?.tabs)
+            ? data.tabs
+                .map(item => String(item?.url || '').trim())
+                .filter(Boolean)
+                .slice(0, 20)
+            : [];
+        const activeIndex = Number.isInteger(data?.activeIndex) ? data.activeIndex : 0;
+        return { tabs: urls, activeIndex };
+    } catch (e) {
+        return { tabs: [], activeIndex: 0 };
+    }
+}
+
+function persistSessionState() {
+    try {
+        const tabsPayload = tabs
+            .map(t => ({ url: String(t.url || '').trim() }))
+            .filter(t => t.url);
+        const activeIndex = Math.max(0, tabs.findIndex(t => t.id === activeTabId));
+        const payload = {
+            tabs: tabsPayload,
+            activeIndex,
+            updatedAt: new Date().toISOString()
+        };
+        fs.mkdirSync(path.dirname(sessionStatePath), { recursive: true });
+        fs.writeFileSync(sessionStatePath, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Failed to persist session state:', e.message);
+    }
+}
+
+function scheduleSessionSave() {
+    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = setTimeout(() => {
+        sessionSaveTimer = null;
+        persistSessionState();
+    }, 250);
+}
+
+function restoreSessionOrDefault() {
+    const state = loadSessionState();
+    if (!state.tabs.length) {
+        createTab('https://google.com');
+        return;
+    }
+
+    const restoredIds = state.tabs.map(url => createTab(url, false));
+    const fallbackIndex = Math.min(restoredIds.length - 1, Math.max(0, state.activeIndex));
+    const restoreId = restoredIds[fallbackIndex] || restoredIds[0];
+    if (restoreId !== undefined) switchTab(restoreId);
 }
 
 // ─── Tab State ───────────────────────────────────────────────────────────────
@@ -130,6 +188,7 @@ function emitTabUpdate(id, patch = {}) {
     const tab = tabs.find(t => t.id === id);
     if (!tab) return;
     Object.assign(tab, patch);
+    if ('url' in patch) scheduleSessionSave();
     if (!win) return;
     win.webContents.send('tab-update', {
         id,
@@ -270,6 +329,7 @@ function createTab(url = 'https://google.com', activate = true) {
 
     const tab = { id, view, url, title: 'New Tab', favicon: '', loading: true, loadProgress: 8, loadingInterval: null, loadingToken: 0 };
     tabs.push(tab);
+    scheduleSessionSave();
 
     if (activate) {
         switchTab(id);
@@ -295,6 +355,7 @@ function switchTab(id) {
     if (!tab) return;
 
     tab.view.setBounds(getViewBounds());
+    scheduleSessionSave();
 
     if (win) {
         win.webContents.send('browser-url-changed', tab.url || '');
@@ -316,6 +377,7 @@ function closeTab(id) {
     win.contentView.removeChildView(tab.view);
     tab.view.webContents.destroy();
     tabs.splice(idx, 1);
+    scheduleSessionSave();
 
     // Switch to nearest tab
     if (id === activeTabId) {
@@ -422,7 +484,7 @@ function createWindow() {
     });
 
     win.webContents.once('did-finish-load', () => {
-        createTab('https://google.com');
+        restoreSessionOrDefault();
         setupAutoUpdater();  // check for updates after UI is ready
     });
 }
@@ -523,6 +585,12 @@ app.on('child-process-gone', (event, details) => {
 });
 
 app.on('before-quit', () => {
+    if (sessionSaveTimer) {
+        clearTimeout(sessionSaveTimer);
+        sessionSaveTimer = null;
+    }
+    persistSessionState();
+
     if (gpuCrashDetected) {
         saveGpuFallbackState(true, 'Detected GPU process crash');
         return;

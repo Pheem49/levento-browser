@@ -297,6 +297,45 @@ function refreshAddressSuggestions() {
 
 loadAddressHistory();
 
+function switchToRelativeTab(offset) {
+    if (!tabOrder.length || activeTabId === null) return;
+    const idx = tabOrder.indexOf(activeTabId);
+    if (idx < 0) return;
+    const nextIdx = (idx + offset + tabOrder.length) % tabOrder.length;
+    const targetTabId = tabOrder[nextIdx];
+    if (typeof targetTabId === 'number') {
+        window.browserAPI.switchTab(targetTabId);
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    const withPrimaryMod = e.ctrlKey || e.metaKey;
+    if (!withPrimaryMod || e.altKey) return;
+
+    const key = e.key.toLowerCase();
+    if (key === 'l' && !e.shiftKey) {
+        e.preventDefault();
+        addressInput.focus();
+        addressInput.select();
+        refreshAddressSuggestions();
+        return;
+    }
+    if (key === 't' && !e.shiftKey) {
+        e.preventDefault();
+        window.browserAPI.newTab('https://google.com');
+        return;
+    }
+    if (key === 'w' && !e.shiftKey) {
+        e.preventDefault();
+        if (activeTabId !== null) window.browserAPI.closeTab(activeTabId);
+        return;
+    }
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        switchToRelativeTab(e.shiftKey ? -1 : 1);
+    }
+});
+
 addressInput.addEventListener('input', refreshAddressSuggestions);
 addressInput.addEventListener('focus', refreshAddressSuggestions);
 addressInput.addEventListener('blur', () => {
@@ -348,6 +387,7 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
 // Per-tab state: { title, url, favicon, cachedContext }
 const tabsState = {};
 let activeTabId = null;
+let tabOrder = [];
 
 function getCachedContext() {
     return tabsState[activeTabId]?.cachedContext || '';
@@ -412,6 +452,7 @@ function renderTabBar(tabs, currentId) {
 // Listen for tab changes from main process
 window.browserAPI.onTabsChanged((data) => {
     const { tabs, activeTabId: newActiveId } = data;
+    tabOrder = tabs.map(t => t.id);
     // Sync tabsState
     tabs.forEach(t => {
         if (!tabsState[t.id]) tabsState[t.id] = { cachedContext: '' };
