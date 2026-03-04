@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog, shell } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog, shell, session } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -61,22 +61,28 @@ let gpuCrashDetected = false;
 const gpuFallbackMarkerPath = path.join(app.getPath('userData'), 'gpu-fallback.json');
 const sessionStatePath = path.join(app.getPath('userData'), 'tabs-session.json');
 let gpuFallbackEnabled = false;
+let gpuFallbackManual = false;
 let sessionSaveTimer = null;
 
 function loadGpuFallbackState() {
     try {
         const raw = fs.readFileSync(gpuFallbackMarkerPath, 'utf8');
         const data = JSON.parse(raw);
-        return Boolean(data && data.enabled);
+        return {
+            enabled: Boolean(data && data.enabled),
+            manual: Boolean(data && data.manual),
+            reason: String(data?.reason || '')
+        };
     } catch (e) {
-        return false;
+        return { enabled: false, manual: false, reason: '' };
     }
 }
 
-function saveGpuFallbackState(enabled, reason = '') {
+function saveGpuFallbackState(enabled, reason = '', manual = false) {
     try {
         const payload = {
             enabled,
+            manual,
             reason,
             updatedAt: new Date().toISOString()
         };
@@ -87,7 +93,9 @@ function saveGpuFallbackState(enabled, reason = '') {
     }
 }
 
-gpuFallbackEnabled = loadGpuFallbackState();
+const initialGpuFallbackState = loadGpuFallbackState();
+gpuFallbackEnabled = initialGpuFallbackState.enabled;
+gpuFallbackManual = initialGpuFallbackState.manual;
 if (gpuFallbackEnabled) {
     app.disableHardwareAcceleration();
     console.warn('GPU fallback enabled: hardware acceleration is disabled for this launch.');
@@ -163,11 +171,25 @@ function getActiveView() {
     return tab ? tab.view : null;
 }
 
+function isActiveTabInHtmlFullscreen() {
+    const tab = tabs.find(t => t.id === activeTabId);
+    return Boolean(tab && tab.htmlFullscreen);
+}
+
+function emitHtmlFullscreenState() {
+    if (!win) return;
+    win.webContents.send('html-fullscreen-changed', isActiveTabInHtmlFullscreen());
+}
+
 function resolveNavigationTarget(rawInput) {
     const input = String(rawInput || '').trim();
     if (!input) return '';
 
-    if (/^(https?:\/\/|file:\/\/|about:|data:)/i.test(input)) {
+    if (/^https?:\/\//i.test(input)) {
+        return input;
+    }
+
+    if (/^about:blank$/i.test(input)) {
         return input;
     }
 
@@ -182,6 +204,130 @@ function resolveNavigationTarget(rawInput) {
     }
 
     return `https://www.google.com/search?q=${encodeURIComponent(input)}`;
+}
+
+function isAllowedNavigationUrl(rawUrl) {
+    try {
+        const url = new URL(String(rawUrl || ''));
+        if (url.protocol === 'http:' || url.protocol === 'https:') return true;
+        if (url.protocol === 'about:' && String(rawUrl).toLowerCase() === 'about:blank') return true;
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+function applyWebContentsSecurityGuards(webContents) {
+    // Block embedded webviews from untrusted pages.
+    webContents.on('will-attach-webview', (event) => {
+        event.preventDefault();
+    });
+
+    // Restrict top-level navigations to safe schemes.
+    webContents.on('will-navigate', (event, url) => {
+        if (!isAllowedNavigationUrl(url)) {
+            event.preventDefault();
+            console.warn('Blocked unsafe navigation:', url);
+        }
+    });
+
+    // Disallow in-app popups; open safe links externally instead.
+    webContents.setWindowOpenHandler(({ url }) => {
+        if (isAllowedNavigationUrl(url)) {
+            shell.openExternal(url).catch(() => { });
+        }
+        return { action: 'deny' };
+    });
+}
+
+function setupPermissionSecurity() {
+    const ses = session.defaultSession;
+    if (!ses) return;
+
+    // Baseline: deny powerful permissions by default.
+    ses.setPermissionRequestHandler((_webContents, permission, callback) => {
+        const allowed = permission === 'fullscreen';
+        callback(allowed);
+    });
+
+    ses.setPermissionCheckHandler((_webContents, permission) => {
+        return permission === 'fullscreen';
+    });
+}
+
+const adHostSuffixDenylist = [
+    'doubleclick.net',
+    'googlesyndication.com',
+    'googleadservices.com',
+    'adservice.google.com',
+    '2mdn.net',
+    'adnxs.com',
+    'taboola.com',
+    'outbrain.com',
+    'criteo.com',
+    'adsrvr.org',
+    'rubiconproject.com',
+    'openx.net',
+    'pubmatic.com',
+    'scorecardresearch.com',
+    'moatads.com',
+    'zedo.com',
+    'yieldmo.com',
+    'advertising.com',
+    'smartadserver.com'
+];
+
+const adBlockedResourceTypes = new Set([
+    'script',
+    'image',
+    'subFrame',
+    'sub_frame',
+    'xmlhttprequest',
+    'media',
+    'font'
+]);
+
+function parseHostname(rawUrl) {
+    try {
+        return new URL(String(rawUrl || '')).hostname.toLowerCase();
+    } catch (e) {
+        return '';
+    }
+}
+
+function isYouTubeHostname(host) {
+    if (!host) return false;
+    return host === 'youtube.com'
+        || host.endsWith('.youtube.com')
+        || host === 'youtu.be'
+        || host.endsWith('.googlevideo.com')
+        || host.endsWith('.ytimg.com');
+}
+
+function isYouTubeContext(details) {
+    const urlHost = parseHostname(details?.url);
+    const initiatorHost = parseHostname(details?.initiator);
+    const referrerHost = parseHostname(details?.referrer);
+    return isYouTubeHostname(urlHost) || isYouTubeHostname(initiatorHost) || isYouTubeHostname(referrerHost);
+}
+
+function shouldBlockAdRequest(details) {
+    if (!details || !details.url) return false;
+    if (isYouTubeContext(details)) return false;
+    if (!adBlockedResourceTypes.has(details.resourceType)) return false;
+
+    const host = parseHostname(details.url);
+    if (!host) return false;
+    return adHostSuffixDenylist.some(suffix => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+function setupAdblockFiltering() {
+    const ses = session.defaultSession;
+    if (!ses) return;
+
+    ses.webRequest.onBeforeRequest((details, callback) => {
+        callback({ cancel: shouldBlockAdRequest(details) });
+    });
 }
 
 function emitTabUpdate(id, patch = {}) {
@@ -250,13 +396,14 @@ function getCurrentAddressInset() {
 function getViewBounds() {
     if (!win) return { x: 0, y: 100, width: 1050, height: 800 };
     const b = win.getContentBounds();
-    const sidebarWidth = sidebarOpen ? 350 : 0;
-    const baseTop = 100; // toolbar (56px) + tab bar (44px)
-    const topInset = getCurrentAddressInset();
+    const htmlFullscreen = isActiveTabInHtmlFullscreen();
+    const sidebarWidth = (sidebarOpen && !htmlFullscreen) ? 350 : 0;
+    const baseTop = htmlFullscreen ? 0 : 100; // toolbar (56px) + tab bar (44px)
+    const topInset = htmlFullscreen ? 0 : getCurrentAddressInset();
     const y = baseTop + topInset;
     return {
         x: 0,
-        y,          // toolbar (56px) + tab bar (44px) + temporary suggestions inset
+        y,          // chrome top bars + temporary suggestions inset
         width: b.width - sidebarWidth,
         height: Math.max(0, b.height - y)
     };
@@ -289,7 +436,13 @@ function animateAddressInsetTo(nextInset) {
 function createTab(url = 'https://google.com', activate = true) {
     const id = nextTabId++;
     const view = new WebContentsView({
-        webPreferences: { nodeIntegration: false, contextIsolation: true }
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+            webSecurity: true,
+            allowRunningInsecureContent: false
+        }
     });
 
     // Keep it hidden initially
@@ -323,11 +476,26 @@ function createTab(url = 'https://google.com', activate = true) {
     view.webContents.on('did-start-loading', () => beginTabLoading(id));
     view.webContents.on('did-stop-loading', () => completeTabLoading(id));
     view.webContents.on('did-fail-load', () => completeTabLoading(id));
+    view.webContents.on('enter-html-full-screen', () => {
+        emitTabUpdate(id, { htmlFullscreen: true });
+        if (id === activeTabId) {
+            applyActiveViewBounds();
+            emitHtmlFullscreenState();
+        }
+    });
+    view.webContents.on('leave-html-full-screen', () => {
+        emitTabUpdate(id, { htmlFullscreen: false });
+        if (id === activeTabId) {
+            applyActiveViewBounds();
+            emitHtmlFullscreenState();
+        }
+    });
+    applyWebContentsSecurityGuards(view.webContents);
 
     // Context menu
     setupContextMenu(view.webContents);
 
-    const tab = { id, view, url, title: 'New Tab', favicon: '', loading: true, loadProgress: 8, loadingInterval: null, loadingToken: 0 };
+    const tab = { id, view, url, title: 'New Tab', favicon: '', loading: true, loadProgress: 8, loadingInterval: null, loadingToken: 0, htmlFullscreen: false };
     tabs.push(tab);
     scheduleSessionSave();
 
@@ -361,6 +529,7 @@ function switchTab(id) {
         win.webContents.send('browser-url-changed', tab.url || '');
         win.webContents.send('tab-switched', id);
         win.webContents.send('tabs-changed', getTabsSummary());
+        emitHtmlFullscreenState();
     }
 }
 
@@ -383,6 +552,8 @@ function closeTab(id) {
     if (id === activeTabId) {
         const nextIdx = Math.min(idx, tabs.length - 1);
         switchTab(tabs[nextIdx].id);
+    } else {
+        emitHtmlFullscreenState();
     }
 
     if (win) win.webContents.send('tabs-changed', getTabsSummary());
@@ -469,6 +640,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: true,
             preload: path.join(__dirname, 'preload.js')
         }
     });
@@ -549,6 +721,7 @@ ipcMain.on('browser-navigate', (event, url) => {
 });
 
 ipcMain.on('browser-toggle-devtools', () => {
+    if (app.isPackaged) return;
     const view = getActiveView();
     if (view) {
         if (view.webContents.isDevToolsOpened()) view.webContents.closeDevTools();
@@ -582,8 +755,23 @@ ipcMain.handle('open-data-folder', async () => {
     }
 });
 
+ipcMain.handle('get-gpu-safe-mode', async () => {
+    const state = loadGpuFallbackState();
+    return { enabled: Boolean(state.enabled) };
+});
+
+ipcMain.handle('set-gpu-safe-mode', async (_event, enabled) => {
+    const nextEnabled = Boolean(enabled);
+    saveGpuFallbackState(nextEnabled, nextEnabled ? 'Manually enabled from Settings' : 'Manually disabled from Settings', nextEnabled);
+    gpuFallbackEnabled = nextEnabled;
+    gpuFallbackManual = nextEnabled;
+    return { ok: true, enabled: nextEnabled, restartRequired: true };
+});
+
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+    setupPermissionSecurity();
+    setupAdblockFiltering();
     createWindow();
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -605,13 +793,13 @@ app.on('before-quit', () => {
     persistSessionState();
 
     if (gpuCrashDetected) {
-        saveGpuFallbackState(true, 'Detected GPU process crash');
+        saveGpuFallbackState(true, 'Detected GPU process crash', false);
         return;
     }
 
-    if (gpuFallbackEnabled) {
+    if (gpuFallbackEnabled && !gpuFallbackManual) {
         // If we launched in fallback mode and stayed stable, try GPU again next run.
-        saveGpuFallbackState(false, 'Cleared after stable fallback launch');
+        saveGpuFallbackState(false, 'Cleared after stable fallback launch', false);
     }
 });
 

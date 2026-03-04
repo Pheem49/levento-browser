@@ -37,6 +37,19 @@ let activeSuggestionIndex = -1;
 let suppressSuggestionRefresh = false;
 let lastAddressInsetSent = -1;
 
+function setHtmlFullscreenMode(isFullscreen) {
+    document.body.classList.toggle('html-fullscreen', Boolean(isFullscreen));
+    if (isFullscreen) {
+        hideAddressSuggestions();
+    }
+}
+
+if (window.browserAPI && window.browserAPI.onHtmlFullscreenChanged) {
+    window.browserAPI.onHtmlFullscreenChanged((isFullscreen) => {
+        setHtmlFullscreenMode(isFullscreen);
+    });
+}
+
 function reportAddressSuggestionsInset() {
     if (!window.browserAPI || !window.browserAPI.setAddressSuggestionsInset) return;
 
@@ -556,6 +569,8 @@ const geminiKeyInput = document.getElementById('gemini-key-input');
 const btnSettingsSave = document.getElementById('btn-settings-save');
 const btnSettingsCancel = document.getElementById('btn-settings-cancel');
 const btnOpenDataFolder = document.getElementById('btn-open-data-folder');
+const gpuSafeModeToggle = document.getElementById('gpu-safe-mode-toggle');
+let initialGpuSafeModeValue = null;
 
 // Load stored settings on init
 const storedKey = localStorage.getItem('levento-gemini-key') || "";
@@ -567,15 +582,40 @@ modelSelect.value = storedModel;
 btnSettings.addEventListener('click', () => {
     if (window.browserAPI && window.browserAPI.openModal) window.browserAPI.openModal();
     settingsModal.style.display = 'flex';
+    if (gpuSafeModeToggle && window.browserAPI && window.browserAPI.getGpuSafeMode) {
+        window.browserAPI.getGpuSafeMode()
+            .then((state) => {
+                const enabled = Boolean(state?.enabled);
+                gpuSafeModeToggle.checked = enabled;
+                initialGpuSafeModeValue = enabled;
+            })
+            .catch(() => { });
+    }
 });
 btnSettingsCancel.addEventListener('click', () => {
     if (window.browserAPI && window.browserAPI.closeModal) window.browserAPI.closeModal();
     settingsModal.style.display = 'none';
 });
-btnSettingsSave.addEventListener('click', () => {
+btnSettingsSave.addEventListener('click', async () => {
     localStorage.setItem('levento-gemini-key', geminiKeyInput.value.trim());
+    const gpuSafeModeChanged = gpuSafeModeToggle && initialGpuSafeModeValue !== null
+        ? gpuSafeModeToggle.checked !== initialGpuSafeModeValue
+        : false;
+    if (gpuSafeModeToggle && window.browserAPI && window.browserAPI.setGpuSafeMode) {
+        try {
+            await window.browserAPI.setGpuSafeMode(gpuSafeModeToggle.checked);
+        } catch (e) {
+            console.error('Failed to save GPU Safe Mode:', e);
+        }
+    }
     if (window.browserAPI && window.browserAPI.closeModal) window.browserAPI.closeModal();
     settingsModal.style.display = 'none';
+    if (gpuSafeModeChanged) {
+        const msg = document.getElementById('greeting-msg');
+        if (msg) {
+            msg.textContent = 'GPU Safe Mode setting saved. Restart app to apply.';
+        }
+    }
 });
 modelSelect.addEventListener('change', (e) => {
     localStorage.setItem('levento-model', e.target.value);

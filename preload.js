@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('browserAPI', {
     openModal: () => ipcRenderer.send('modal-open'),
     closeModal: () => ipcRenderer.send('modal-close'),
     openDataFolder: () => ipcRenderer.invoke('open-data-folder'),
+    getGpuSafeMode: () => ipcRenderer.invoke('get-gpu-safe-mode'),
+    setGpuSafeMode: (enabled) => ipcRenderer.invoke('set-gpu-safe-mode', enabled),
 
     // Sidebar
     sidebarToggle: (isOpen) => ipcRenderer.send('sidebar-toggle', isOpen),
@@ -31,4 +33,5 @@ contextBridge.exposeInMainWorld('browserAPI', {
     onTabsChanged: (cb) => ipcRenderer.on('tabs-changed', (_e, data) => cb(data)),
     onTabSwitched: (cb) => ipcRenderer.on('tab-switched', (_e, id) => cb(id)),
     onTabUpdate: (cb) => ipcRenderer.on('tab-update', (_e, data) => cb(data)),
+    onHtmlFullscreenChanged: (cb) => ipcRenderer.on('html-fullscreen-changed', (_e, isFullscreen) => cb(Boolean(isFullscreen))),
 })

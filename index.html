@@ -12,6 +12,12 @@
 
 <body>
     <div id="app">
+        <!-- Tab Bar -->
+        <div id="tab-bar">
+            <div id="tab-list"></div>
+            <button id="btn-new-tab" title="New Tab">+</button>
+        </div>
+
         <header id="toolbar" class="glass-panel drag-region">
 
             <div class="nav-actions no-drag">
@@ -33,12 +39,6 @@
                 </button>
             </div>
         </header>
-
-        <!-- Tab Bar -->
-        <div id="tab-bar">
-            <div id="tab-list"></div>
-            <button id="btn-new-tab" title="New Tab">+</button>
-        </div>
 
         <div id="main-content">
             <main id="browser-view">
@@ -116,6 +116,13 @@
                 <input type="password" id="gemini-key-input"
                     style="width:100%; padding:8px; background:var(--input-bg); border:1px solid var(--border-color); color:var(--text-primary); border-radius:6px; outline:none;"
                     placeholder="AIzaSy...">
+            </div>
+            <div style="margin-bottom:16px; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.03);">
+                <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                    <input type="checkbox" id="gpu-safe-mode-toggle">
+                    <span>GPU Safe Mode (reduce GPU crashes)</span>
+                </label>
+                <div style="margin-top:6px; font-size:12px; color:var(--text-secondary);">Requires app restart to take effect.</div>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                 <button id="btn-open-data-folder"

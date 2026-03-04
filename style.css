@@ -26,6 +26,16 @@ body {
   flex-direction: column;
 }
 
+body.html-fullscreen #tab-bar,
+body.html-fullscreen #toolbar,
+body.html-fullscreen #sidebar {
+  display: none !important;
+}
+
+body.html-fullscreen #main-content {
+  height: 100vh;
+}
+
 #app {
   display: flex;
   flex-direction: column;
