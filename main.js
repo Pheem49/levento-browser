@@ -248,15 +248,15 @@ function getCurrentAddressInset() {
 }
 
 function getViewBounds() {
-    if (!win) return { x: 0, y: 86, width: 1050, height: 814 };
+    if (!win) return { x: 0, y: 100, width: 1050, height: 800 };
     const b = win.getContentBounds();
     const sidebarWidth = sidebarOpen ? 350 : 0;
-    const baseTop = 86;
+    const baseTop = 100; // toolbar (56px) + tab bar (44px)
     const topInset = getCurrentAddressInset();
     const y = baseTop + topInset;
     return {
         x: 0,
-        y,          // toolbar (50px) + tab bar (36px) + temporary suggestions inset
+        y,          // toolbar (56px) + tab bar (44px) + temporary suggestions inset
         width: b.width - sidebarWidth,
         height: Math.max(0, b.height - y)
     };

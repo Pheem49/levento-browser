@@ -48,75 +48,49 @@
             </main>
             <aside id="sidebar" class="glass-panel">
                 <div class="sidebar-header">
-                    <!-- Row 1: Branding + Settings -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <div
-                                style="width:8px; height:8px; border-radius:50%; background:#4ade80; box-shadow:0 0 8px #4ade80; flex-shrink:0;">
-                            </div>
-                            <span
-                                style="font-size:13px; font-weight:700; letter-spacing:0.06em; color:#e2e8f0;">LEVENTO</span>
-                            <span
-                                style="font-size:10px; padding:2px 7px; background:rgba(88,166,255,0.15); color:#93c5fd; border:1px solid rgba(88,166,255,0.25); border-radius:20px; letter-spacing:0.05em;">AI</span>
+                    <div class="ai-top-row">
+                        <div class="ai-brand">
+                            <div class="ai-status-dot"></div>
+                            <span class="ai-brand-text">LEVENTO</span>
+                            <span class="ai-brand-badge">AI</span>
                         </div>
-                        <button id="btn-settings"
-                            style="padding:4px 8px; font-size:13px; border:none; background:rgba(255,255,255,0.06); border-radius:6px; cursor:pointer;"
-                            title="Settings">⚙️</button>
+                        <button id="btn-settings" class="ai-settings-btn" title="Settings">⚙️</button>
                     </div>
 
-                    <!-- Row 2: Model Card -->
-                    <div
-                        style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
-                        <div
-                            style="font-size:9px; color:#64748b; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px;">
-                            🧠 Model</div>
-                        <select id="model-select"
-                            style="width:100%; background:rgba(15,15,25,0.7); color:#e2e8f0; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:7px 10px; font-size:13px; outline:none; cursor:pointer;">
+                    <div class="ai-model-card">
+                        <div class="ai-card-label">🧠 Model</div>
+                        <select id="model-select" class="ai-model-select">
                             <option value="ollama">⚡ Ollama (Local)</option>
                             <option value="gemini">✨ Gemini 2.5 Flash</option>
                         </select>
                     </div>
 
-                    <!-- Row 3: Stats Grid -->
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px;">
-                        <div
-                            style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:8px 10px;">
-                            <div
-                                style="font-size:9px; color:#64748b; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px;">
-                                ⚡ Response</div>
-                            <div style="font-size:18px; font-weight:700; color:#4ade80; line-height:1;" id="stat-speed">
-                                —</div>
-                            <div style="font-size:9px; color:#475569; margin-top:2px;">seconds</div>
+                    <div class="ai-stats-grid">
+                        <div class="ai-stat-card">
+                            <div class="ai-card-label">⚡ Response</div>
+                            <div class="ai-stat-value speed" id="stat-speed">—</div>
+                            <div class="ai-stat-sub">seconds</div>
                         </div>
-                        <div
-                            style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:8px 10px;">
-                            <div
-                                style="font-size:9px; color:#64748b; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px;">
-                                📊 Tokens</div>
-                            <div style="font-size:18px; font-weight:700; color:#93c5fd; line-height:1;"
-                                id="stat-tokens">0</div>
-                            <div style="font-size:9px; color:#475569; margin-top:2px;">est. used</div>
+                        <div class="ai-stat-card">
+                            <div class="ai-card-label">📊 Tokens</div>
+                            <div class="ai-stat-value tokens" id="stat-tokens">0</div>
+                            <div class="ai-stat-sub">est. used</div>
                         </div>
                     </div>
 
-                    <!-- Page Info Panel -->
-                    <div id="page-info"
-                        style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:var(--text-secondary); display:none;">
-                        <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-                            <span id="page-favicon" style="font-size:14px;">📄</span>
-                            <span id="page-domain"
-                                style="color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;">—</span>
+                    <div id="page-info" class="ai-page-info">
+                        <div class="ai-page-main">
+                            <span id="page-favicon" class="ai-page-favicon">📄</span>
+                            <span id="page-domain" class="ai-page-domain">—</span>
                         </div>
-                        <div style="display:flex; gap:12px;">
+                        <div class="ai-page-meta">
                             <span>📝 <span id="page-words">—</span> words</span>
                             <span>⏱ <span id="page-read-time">—</span> min read</span>
                         </div>
                     </div>
 
-                    <!-- Summarize Button -->
-                    <button id="btn-summarize"
-                        style="width:100%; padding:9px; font-size:13px; background:linear-gradient(135deg, #3b82f6 0%, #6366f1 100%); border:none; color:white; border-radius:8px; font-weight:600; letter-spacing:0.02em; cursor:pointer; transition:all 0.2s; box-shadow:0 2px 12px rgba(99,102,241,0.3);"
-                        title="Summarize current page">✨ Summarize This Page</button>
+                    <button id="btn-summarize" class="ai-summarize-btn" title="Summarize current page">✨ Summarize This
+                        Page</button>
                 </div>
                 <div class="chat-container" id="chat-container">
                     <div class="message ai-message" id="greeting-msg">💡 Open any page and ask me about it — no need to
